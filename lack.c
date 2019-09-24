@@ -1,4 +1,6 @@
 
+#include "mkserv.h"
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -11,26 +13,27 @@ MODULE_AUTHOR( "indigoparadox" );
 MODULE_DESCRIPTION( "A lacking web admin tool for the kernel." );
 MODULE_VERSION( "0.19.9" );
 
+int lack_handler( struct mkservice* service );
+
+struct mkservice lack_listen = {
+   "lack", lack_handler, 0, 0 };
+
+int lack_handler( struct mkservice* service ) {
+
+   return 0;
+}
+
 static int __init lack_init( void ) {
-   int res = 0;
  
-   printk( KERN_INFO "lack: opening socket...\n" );
+   printk( KERN_INFO "lack: starting up...\n" );
+
+   mkserv_listen( &lack_listen, 8045 );
 
    return 0;
 }
 
 static void __exit lack_exit( void ) {
-   /*if( NULL == listener ) {
-      printk( KERN_WARNING "lack: socket not found...\n" );
-      return;
-   }
-   if( NULL == listener->ops ) {
-      printk( KERN_WARNING "lack: socket ops not found...\n" );
-      return;
-   }
-   printk( KERN_INFO "lack: closing socket...\n" );
-   listener->ops->release( listener );
-   listener = NULL;*/
+   mkserv_shutdown( &lack_listen );
 }
 
 module_init( lack_init );

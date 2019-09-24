@@ -1,4 +1,6 @@
 
+#include "mkserv.h"
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -7,8 +9,6 @@
 #include <net/net_namespace.h>
 #include <linux/mutex.h>
 #include <linux/kthread.h>
-
-#include "mkserv.h"
 
 MODULE_LICENSE( "GPL");
 MODULE_AUTHOR( "indigoparadox" );
@@ -20,51 +20,19 @@ EXPORT_SYMBOL( mkserv_shutdown );
 
 struct mkservice testsvc = { 0 };
 
-int mkserv_listen( struct mkservice* service, int port ) {
+int mkserv_accept( void* data ) {
    int res = 0;
-   struct sockaddr_in listen_addr = { 0 };
+   struct mkservice* service = (struct mkservice*)data;
 
    DECLARE_WAIT_QUEUE_HEAD( wq );
-
-   allow_signal( SIGKILL | SIGTERM );
-
-   /* Create the listener socket. */
-   res = sock_create( AF_INET, SOCK_STREAM, IPPROTO_TCP, &(service->listener) );
-
-   if( 0 > res ) {
-      printk( KERN_ERR "unable to open mkserv socket\n" );
-      goto cleanup;
-   }
-
-   /* Bind the listener to the given address. */
-   listen_addr.sin_addr.s_addr = INADDR_ANY;
-   listen_addr.sin_family = AF_INET;
-   listen_addr.sin_port = htons( port );
-
-   res = service->listener->ops->bind( service->listener,
-      (struct sockaddr*)&listen_addr, sizeof( listen_addr ) );
-
-   if( 0 > res ) {
-      printk( KERN_ERR "unable to bind socket to port %d\n", port );
-      mkserv_shutdown( service );
-      goto cleanup;
-   }
-
-   /* Start listening. */
-   res = service->listener->ops->listen( service->listener, MKSERV_BACKLOG );
-
-   if( 0 > res ) {
-      printk( KERN_ERR "unable to listen\n" );
-      mkserv_shutdown( service );
-      goto cleanup;
-   }
-
+   
    while( 1 ) {
       wait_event_timeout( wq, 0, 3 * HZ );
 
       if( kthread_should_stop() ) {
+         printk( KERN_INFO "%s: stopping listen thread...\n",
+            service->name );
          res = 1;
-         printk( KERN_INFO "stopping listen thread...\n" );
          goto cleanup;
       }
 
@@ -79,10 +47,72 @@ cleanup:
    return res;
 }
 
+int mkserv_listen( struct mkservice* service, int port ) {
+   int res = 0;
+   struct sockaddr_in listen_addr = { 0 };
+
+   allow_signal( SIGKILL | SIGTERM );
+
+   printk( KERN_INFO "mkserv: opening listener on port %d", port );
+
+   /* Create the listener socket. */
+   res = sock_create(
+      AF_INET, SOCK_STREAM, IPPROTO_TCP, &(service->listen_sock) );
+
+   if( 0 > res ) {
+      printk( KERN_ERR "mkserv: unable to open socket\n" );
+      goto cleanup;
+   }
+
+   /* Bind the listener to the given address. */
+   listen_addr.sin_addr.s_addr = INADDR_ANY;
+   listen_addr.sin_family = AF_INET;
+   listen_addr.sin_port = htons( port );
+
+   res = service->listen_sock->ops->bind( service->listen_sock,
+      (struct sockaddr*)&listen_addr, sizeof( listen_addr ) );
+
+   if( 0 > res ) {
+      printk( KERN_ERR "mkserv: unable to bind socket to port %d\n", port );
+      mkserv_shutdown( service );
+      goto cleanup;
+   }
+
+   /* Start listening. */
+   res = service->listen_sock->ops->listen(
+      service->listen_sock, MKSERV_BACKLOG );
+
+   if( 0 > res ) {
+      printk( KERN_ERR "mkserv: unable to listen\n" );
+      mkserv_shutdown( service );
+      goto cleanup;
+   }
+
+   service->accept_thd = kthread_run( mkserv_accept, service, service->name );
+
+cleanup:
+
+   return res;
+}
+
 int mkserv_shutdown( struct mkservice* service ) {
-   if( NULL != service->listener ) {
-      sock_release( service->listener );
-      service->listener = NULL;
+   int res = 0;
+
+   if( NULL != service->accept_thd ) {
+      printk( KERN_INFO "%s: stopping accept thread...\n", service->name );
+      res = kthread_stop( service->accept_thd );
+      if( res ) {
+         printk( KERN_WARNING "%s: unable to stop accept thread\n",
+            service->name );
+      } else {
+         printk( KERN_INFO "%s: stopped accept thread\n", service->name );
+      }
+   }
+
+   if( NULL != service->listen_sock ) {
+      printk( KERN_INFO "%s: closing socket\n", service->name );
+      sock_release( service->listen_sock );
+      service->listen_sock = NULL;
    }
 
    return 0;

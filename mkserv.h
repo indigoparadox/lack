@@ -4,8 +4,16 @@
 
 #define MKSERV_BACKLOG 16
 
+struct mkservice;
+
+typedef int (*mkserv_handler)( struct mkservice* );
+
 struct mkservice {
-   struct socket* listener;
+   const char name[20];
+   mkserv_handler handle_func;
+
+   struct socket* listen_sock;
+   struct task_struct* accept_thd;
 };
 
 int mkserv_listen( struct mkservice* service, int port );
