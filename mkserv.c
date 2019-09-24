@@ -18,8 +18,6 @@ MODULE_VERSION( "0.19.9" );
 EXPORT_SYMBOL( mkserv_listen );
 EXPORT_SYMBOL( mkserv_shutdown );
 
-struct mkservice testsvc = { 0 };
-
 int mkserv_accept( void* data ) {
    int res = 0;
    struct mkservice* service = (struct mkservice*)data;
@@ -30,9 +28,8 @@ int mkserv_accept( void* data ) {
       wait_event_timeout( wq, 0, 3 * HZ );
 
       if( kthread_should_stop() ) {
-         printk( KERN_INFO "%s: stopping listen thread...\n",
-            service->name );
-         res = 1;
+         printk( KERN_INFO "mkserv: peacefully stopping accept thread...\n" );
+         res = 0;
          goto cleanup;
       }
 
@@ -102,7 +99,7 @@ int mkserv_shutdown( struct mkservice* service ) {
       printk( KERN_INFO "%s: stopping accept thread...\n", service->name );
       res = kthread_stop( service->accept_thd );
       if( res ) {
-         printk( KERN_WARNING "%s: unable to stop accept thread\n",
+         printk( KERN_WARNING "%s: problem stopping accept thread\n",
             service->name );
       } else {
          printk( KERN_INFO "%s: stopped accept thread\n", service->name );
@@ -127,8 +124,6 @@ static int __init mkserv_init( void ) {
       &init_net, PF_INET, SOCK_STREAM, IPPROTO_TCP, &listener );
 */
 
-   mkserv_listen( &testsvc, 4567 );
-
    return 0;
 }
 
@@ -145,7 +140,6 @@ static void __exit mkserv_exit( void ) {
    listener->ops->release( listener );
    listener = NULL;*/
 
-   mkserv_shutdown( &testsvc );
 }
 
 module_init( mkserv_init );
