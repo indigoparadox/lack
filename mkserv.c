@@ -27,7 +27,7 @@ int mkserv_accept( void* data ) {
    struct inet_connection_sock* isock = NULL;
    struct socket* new_sock = NULL;
 
-   DECLARE_WAITQUEUE( wq, current );
+   //DECLARE_WAITQUEUE( wq, current );
    
    while( service->running ) {
 
@@ -38,6 +38,7 @@ int mkserv_accept( void* data ) {
 
       /* Check the connection queue to see if there are new incoming. */
       if( reqsk_queue_empty( &(isock->icsk_accept_queue) ) ) {
+#if 0
          /* Nothing waiting, so go to sleep. */
          add_wait_queue( &(service->listen_sock->sk->sk_wq->wait), &wq );
          __set_current_state( TASK_INTERRUPTIBLE );
@@ -46,11 +47,14 @@ int mkserv_accept( void* data ) {
          /* Resuming from sleep, try again. */
          __set_current_state( TASK_RUNNING );
          remove_wait_queue( &(service->listen_sock->sk->sk_wq->wait), &wq );
+#endif
          continue;
       }
 
+#if 0
       /* Create a socket to accept the connection. */
-      res = sock_create( AF_INET, SOCK_STREAM, IPPROTO_TCP, &new_sock );
+      res = sock_create_kern(
+         &init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &new_sock );
       if( 0 > res ) {
          printk( KERN_ERR "%s: error creating server socket\n", service->name );
          continue;
@@ -58,19 +62,20 @@ int mkserv_accept( void* data ) {
 
       /* Accept the connection to a new socket. */
       printk( KERN_INFO "%s: accepting connection...\n", service->name );
-      res = service->listen_sock->ops->accept( service->listen_sock,
-         new_sock, O_NONBLOCK );
+      res = kernel_accept( service->listen_sock, &new_sock, O_NONBLOCK );
       if( 0 > res ) {
          printk( KERN_ERR "%s: error accepting connection\n", service->name );
-         sock_release( new_sock );
          continue;
       }
+#endif
    }
 
    printk( KERN_INFO "mkserv: peacefully stopping accept thread...\n" );
 
+#if 0
    sock_release( new_sock );
    kfree( new_sock );
+#endif
 
    return res;
 }
@@ -84,8 +89,8 @@ int mkserv_listen( struct mkservice* service, int port ) {
    printk( KERN_INFO "mkserv: opening listener on port %d", port );
 
    /* Create the listener socket. */
-   res = sock_create(
-      AF_INET, SOCK_STREAM, IPPROTO_TCP, &(service->listen_sock) );
+   res = sock_create_kern(
+      &init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &(service->listen_sock) );
 
    if( 0 > res ) {
       printk( KERN_ERR "mkserv: unable to open socket\n" );
@@ -97,7 +102,7 @@ int mkserv_listen( struct mkservice* service, int port ) {
    listen_addr.sin_family = AF_INET;
    listen_addr.sin_port = htons( port );
 
-   res = service->listen_sock->ops->bind( service->listen_sock,
+   res = kernel_bind( service->listen_sock,
       (struct sockaddr*)&listen_addr, sizeof( listen_addr ) );
 
    if( 0 > res ) {
@@ -107,8 +112,7 @@ int mkserv_listen( struct mkservice* service, int port ) {
    }
 
    /* Start listening. */
-   res = service->listen_sock->ops->listen(
-      service->listen_sock, MKSERV_BACKLOG );
+   res = kernel_listen( service->listen_sock, MKSERV_BACKLOG );
 
    if( 0 > res ) {
       printk( KERN_ERR "mkserv: unable to listen\n" );
@@ -147,34 +151,4 @@ int mkserv_shutdown( struct mkservice* service ) {
 
    return 0;
 }
-
-static int __init mkserv_init( void ) {
-/*
-   int res = 0;
- 
-   printk( KERN_INFO "mkserv: opening socket...\n" );
-   res = sock_create_kern(
-      &init_net, PF_INET, SOCK_STREAM, IPPROTO_TCP, &listener );
-*/
-
-   return 0;
-}
-
-static void __exit mkserv_exit( void ) {
-   /*if( NULL == listener ) {
-      printk( KERN_WARNING "mkserv: socket not found...\n" );
-      return;
-   }
-   if( NULL == listener->ops ) {
-      printk( KERN_WARNING "mkserv: socket ops not found...\n" );
-      return;
-   }
-   printk( KERN_INFO "mkserv: closing socket...\n" );
-   listener->ops->release( listener );
-   listener = NULL;*/
-
-}
-
-module_init( mkserv_init );
-module_exit( mkserv_exit );
 
