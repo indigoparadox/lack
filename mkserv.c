@@ -9,6 +9,9 @@
 #include <net/net_namespace.h>
 #include <linux/mutex.h>
 #include <linux/kthread.h>
+#include <linux/wait.h>
+#include <net/request_sock.h>
+#include <net/inet_connection_sock.h>
 
 MODULE_LICENSE( "GPL");
 MODULE_AUTHOR( "indigoparadox" );
@@ -21,25 +24,53 @@ EXPORT_SYMBOL( mkserv_shutdown );
 int mkserv_accept( void* data ) {
    int res = 0;
    struct mkservice* service = (struct mkservice*)data;
+   struct inet_connection_sock* isock = NULL;
+   struct socket* new_sock = NULL;
 
-   DECLARE_WAIT_QUEUE_HEAD( wq );
+   DECLARE_WAITQUEUE( wq, current );
    
-   while( 1 ) {
-      wait_event_timeout( wq, 0, 3 * HZ );
+   while( service->running ) {
 
       if( kthread_should_stop() ) {
-         printk( KERN_INFO "mkserv: peacefully stopping accept thread...\n" );
-         res = 0;
-         goto cleanup;
+         service->running = 0;
+         break;
       }
 
-      if( signal_pending( current ) ) {
-         res = 1;
-         goto cleanup;
+      /* Check the connection queue to see if there are new incoming. */
+      if( reqsk_queue_empty( &(isock->icsk_accept_queue) ) ) {
+         /* Nothing waiting, so go to sleep. */
+         add_wait_queue( &(service->listen_sock->sk->sk_wq->wait), &wq );
+         __set_current_state( TASK_INTERRUPTIBLE );
+         schedule_timeout( HZ );
+
+         /* Resuming from sleep, try again. */
+         __set_current_state( TASK_RUNNING );
+         remove_wait_queue( &(service->listen_sock->sk->sk_wq->wait), &wq );
+         continue;
+      }
+
+      /* Create a socket to accept the connection. */
+      res = sock_create( AF_INET, SOCK_STREAM, IPPROTO_TCP, &new_sock );
+      if( 0 > res ) {
+         printk( KERN_ERR "%s: error creating server socket\n", service->name );
+         continue;
+      }
+
+      /* Accept the connection to a new socket. */
+      printk( KERN_INFO "%s: accepting connection...\n", service->name );
+      res = service->listen_sock->ops->accept( service->listen_sock,
+         new_sock, O_NONBLOCK );
+      if( 0 > res ) {
+         printk( KERN_ERR "%s: error accepting connection\n", service->name );
+         sock_release( new_sock );
+         continue;
       }
    }
 
-cleanup:
+   printk( KERN_INFO "mkserv: peacefully stopping accept thread...\n" );
+
+   sock_release( new_sock );
+   kfree( new_sock );
 
    return res;
 }
@@ -85,6 +116,8 @@ int mkserv_listen( struct mkservice* service, int port ) {
       goto cleanup;
    }
 
+   /* Start processing thread. */
+   service->running = 1;
    service->accept_thd = kthread_run( mkserv_accept, service, service->name );
 
 cleanup:

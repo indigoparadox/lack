@@ -14,6 +14,7 @@ struct mkservice {
 
    struct socket* listen_sock;
    struct task_struct* accept_thd;
+   int running;
 };
 
 int mkserv_listen( struct mkservice* service, int port );
